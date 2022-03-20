@@ -1,4 +1,4 @@
-use ras::{
+use ras_service::{
 	RasServiceBuilder,
 	HttpStatus,
 	ras_helper::Query,
@@ -52,7 +52,7 @@ fn some_test_get(
 	let result = if let Some(param_str) = params {
 		format!(
 			"Your params: {:?}",
-			ras::ras_helper::parse_get_params(param_str)
+			ras_service::ras_helper::parse_get_params(param_str)
 		)
 	} else {
 		"Empty params".to_string()

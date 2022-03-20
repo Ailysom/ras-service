@@ -6,7 +6,7 @@ use std::collections::HashMap;
 ///
 /// ```
 /// let param_str = "param1=1&param2=with space&param3=3";
-/// let params = ras::ras_helper::parse_get_params(param_str);
+/// let params = ras_service::ras_helper::parse_get_params(param_str);
 
 /// let vec_params = Vec::<Vec<String>>::from([
 /// 	Vec::from(["param1".to_string(), "1".to_string()]),
