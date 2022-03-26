@@ -1,12 +1,4 @@
-use ras_service::{
-	RasServiceBuilder,
-	HttpStatus,
-	ras_helper::Query,
-	RasResult
-};
-use std::{
-	sync::Arc
-};
+use ras_service::*;
 use reqwest::blocking::Client;
 
 struct Service {
@@ -22,11 +14,11 @@ impl Service {
 }
 
 fn some_test_post(
-	runtime: tokio::runtime::Handle,
+	runtime: Handle,
 	self_service: Arc<Service>,
 	query: Option<&str>)
 -> RasResult {
-	let query: Query = if let Some(query_str) = query {
+	let query: HashMap<String, Option<String>> = if let Some(query_str) = query {
 		match serde_json::from_str(query_str) {
 			Ok(query) => query,
 			Err(err) => {
@@ -45,7 +37,7 @@ fn some_test_post(
 }
 
 fn some_test_get(
-	_runtime: tokio::runtime::Handle,
+	_runtime: Handle,
 	_self_service: Arc<Service>,
 	params: Option<&str>)
 -> RasResult {
@@ -79,22 +71,18 @@ fn main_integraion_test() {
 		let client = Client::new();
 		let res = client.post("http://127.0.0.1:7878/api/some_test").body("
 		{
-			\"token\":\"some_token\",
-			\"data\":
-				{
-					\"param1\":\"p1\"
-				}
+			\"data\":\"some_data\"
 		}
 		").send().unwrap();
 		assert_eq!(reqwest::StatusCode::OK, res.status());
-		let result = "You data: Query { token: \"some_token\", data: Some({\"param1\": \"p1\"}) }; Resource: \"resource\""
+		let result = "You data: {\"data\": Some(\"some_data\")}; Resource: \"resource\""
 			.to_string();
 		assert_eq!(result, res.text().unwrap());
 		let res = client.get(
-			"http://127.0.0.1:7878/api/some_test?param1=hello&parram2=world"
+			"http://127.0.0.1:7878/api/some_test?param1=hello"
 		).send().unwrap();		
 		assert_eq!(reqwest::StatusCode::OK, res.status());
-		let result = "Your params: [[\"param1\", \"hello\"], [\"parram2\", \"world\"]]"
+		let result = "Your params: {\"param1\": Some(\"hello\")}"
 			.to_string();
 		assert_eq!(result, res.text().unwrap());
 	});

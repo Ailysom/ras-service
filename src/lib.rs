@@ -12,8 +12,7 @@
 //!
 //! Signature functions:
 //!
-//! #[ignore]
-//!  fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+//!  fn(Handle, Arc<T>, Option<&str>) -> RasResult
 //!
 //! Must return RasResult::Sync for sync call,
 //! and RasResult::Async for async call.
@@ -24,15 +23,7 @@
 //! # Examples
 //!
 //! ```
-//! use ras_service::{
-//! 	RasServiceBuilder,
-//! 	HttpStatus,
-//! 	ras_helper::Query,
-//! 	RasResult
-//! };
-//! use std::{
-//! 	sync::Arc
-//! };
+//! use ras_service::*;
 //!
 //! // Your Service (used for contains resources, as discriptos or data)
 //! // Must be Sync + Send
@@ -51,7 +42,7 @@
 //! 
 //! //Sync get function
 //! fn some_test_get(
-//! 	runtime: tokio::runtime::Handle,
+//! 	runtime: Handle,
 //! 	self_service: Arc<Service>,
 //! 	params: Option<&str>)
 //! -> RasResult {
@@ -71,21 +62,22 @@
 //!
 //! //Async post funtion
 //! fn some_test_post(
-//! 	runtime: tokio::runtime::Handle,
+//! 	runtime: Handle,
 //! 	self_service: Arc<Service>,
 //! 	query: Option<&str>)
 //! -> RasResult {
-//! 	let query: Query = if let Some(query_str) = query {
-//! 		match serde_json::from_str(query_str) {
-//! 			Ok(query) => query,
-//! 			Err(err) => {
-//! 				eprintln!("Error! Bad json format: {:?}", err);
-//! 				return RasResult::Sync(HttpStatus::BadRequest, None);
+//! 	let query: HashMap<String, Option<String>> = 
+//! 		if let Some(query_str) = query {
+//! 			match serde_json::from_str(query_str) {
+//! 				Ok(query) => query,
+//! 				Err(err) => {
+//! 					eprintln!("Error! Bad json format: {:?}", err);
+//! 					return RasResult::Sync(HttpStatus::BadRequest, None);
+//! 				}
 //! 			}
-//! 		}
-//! 	} else {
-//! 		return RasResult::Sync(HttpStatus::BadRequest, None);
-//! 	};
+//! 		} else {
+//! 			return RasResult::Sync(HttpStatus::BadRequest, None);
+//! 		};
 //! 	let service = self_service.clone();
 //! 	RasResult::Async(runtime.spawn(async move {
 //! 		let result = format!("You data: {:?}; Resource: {:?}", query, service.some_data);
@@ -106,16 +98,37 @@
 //! }
 //! ```
 
+// TODO: finish the documentation
+// TODO: write tests for ras auth client
+
 /// Additional functions
 pub mod ras_helper;
+/// Tools for implementation of identification and authentication.
+///
+/// For use your service must implementation trait RasAuthClient.
+/// User data contains into AccessToken.
+///
+/// Authentication Server - ras_auth 
+#[cfg(feature = "Authentication")]
+pub mod ras_auth_client;
 
-use std::{
-	sync::Arc,
-	collections::HashMap,
-};
 use tokio::{
 	task::JoinHandle,
 	io::AsyncWriteExt
+};
+
+//re export
+pub use openssl::{
+	sign::Verifier,
+	hash::MessageDigest,
+	pkey::PKey,
+	pkey::Public,
+	error::ErrorStack
+};
+pub use tokio::runtime::Handle;
+pub use std::{
+	sync::{Arc, Mutex},
+	collections::HashMap,
 };
 
 /// Result for user functions.
@@ -152,7 +165,7 @@ where T: Sync + Send {
 		tokio::runtime::Builder::new_multi_thread()
 			.worker_threads(num_threads)
 			.enable_io()
-			//.enable_time()
+			.enable_time()
 			.build()
 			.expect("Panic! Can't build tokio runtime")
 	}
