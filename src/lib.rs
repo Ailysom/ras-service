@@ -42,11 +42,10 @@
 //! 
 //! //Sync get function
 //! fn some_test_get(
-//! 	runtime: Handle,
 //! 	self_service: Arc<Service>,
-//! 	params: Option<&str>)
+//! 	params: HttpData)
 //! -> RasResult {
-//! 	let result = if let Some(param_str) = params {
+//! 	let result = if let Some(param_str) = params.body {
 //! 		format!(
 //! 			"Your params: {:#?}",
 //!				ras_service::ras_helper::parse_get_params(param_str)
@@ -62,12 +61,11 @@
 //!
 //! //Async post funtion
 //! fn some_test_post(
-//! 	runtime: Handle,
 //! 	self_service: Arc<Service>,
-//! 	query: Option<&str>)
+//! 	query: HttpData)
 //! -> RasResult {
 //! 	let query: HashMap<String, Option<String>> = 
-//! 		if let Some(query_str) = query {
+//! 		if let Some(query_str) = query.body {
 //! 			match serde_json::from_str(query_str) {
 //! 				Ok(query) => query,
 //! 				Err(err) => {
@@ -79,6 +77,7 @@
 //! 			return RasResult::Sync(HttpStatus::BadRequest, None);
 //! 		};
 //! 	let service = self_service.clone();
+//! 	let runtime = Handle::current();
 //! 	RasResult::Async(runtime.spawn(async move {
 //! 		let result = format!("You data: {:?}; Resource: {:?}", query, service.some_data);
 //! 		(HttpStatus::OK, Some(result))
@@ -126,6 +125,7 @@ pub use openssl::{
 	error::ErrorStack
 };
 pub use tokio::runtime::Handle;
+pub use httparse::Request;
 pub use std::{
 	sync::{Arc, Mutex},
 	collections::HashMap,
@@ -144,11 +144,11 @@ pub enum RasResult {
 pub struct RasServiceBuilder<T> {
 	get_functions: HashMap<
 		String,
-		fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+		fn(Arc<T>, HttpData) -> RasResult
 	>,
 	post_functions: HashMap<
 		String,
-		fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+		fn(Arc<T>, HttpData) -> RasResult
 	>,
 	runtime: tokio::runtime::Runtime,
 	service: Arc<T>,
@@ -198,7 +198,7 @@ where T: Sync + Send {
 	pub fn add_get_function(
 		mut self,
 		name: String,
-		f: fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult,
+		f: fn(Arc<T>, HttpData) -> RasResult,
 	) -> Self {
 		let funcs = self.mut_get_functions();
 		funcs.insert(name, f);
@@ -209,7 +209,7 @@ where T: Sync + Send {
 	pub fn add_post_function(
 		mut self,
 		name: String,
-		f: fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult,
+		f: fn(Arc<T>, HttpData) -> RasResult,
 	) -> Self {
 		let funcs = self.mut_post_functions();
 		funcs.insert(name, f);
@@ -249,7 +249,7 @@ where T: Sync + Send {
 	fn post_functions(&self)
 	-> &HashMap<
 		String,
-		fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+		fn(Arc<T>, HttpData) -> RasResult
 	> {
 		&self.post_functions
 	}
@@ -258,15 +258,14 @@ where T: Sync + Send {
 		&self,
 		funcs: &HashMap<
 			String,
-			fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+			fn(Arc<T>, HttpData) -> RasResult
 		>,
 		func_name: &str,
-		input_data: Option<&str>,
+		input_data: HttpData<'_>,
 	) -> (HttpStatus, Option<String>) {
 		let result = match funcs.get(func_name) {
 			Some(func) => {
-				let runtime_handler = tokio::runtime::Handle::current();
-				func(runtime_handler, self.service.clone(), input_data)
+				func(self.service.clone(), input_data)
 			},
 			None => RasResult::Sync(HttpStatus::NotFound, None),
 		};
@@ -283,7 +282,7 @@ where T: Sync + Send {
 	fn get_functions(&self)
 	-> &HashMap<
 		String,
-		fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+		fn(Arc<T>, HttpData) -> RasResult
 	> {
 		&self.get_functions
 	}
@@ -291,7 +290,7 @@ where T: Sync + Send {
 	fn mut_get_functions(&mut self)
 	-> &mut HashMap<
 		String,
-		fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+		fn(Arc<T>, HttpData) -> RasResult
 	> {
 		&mut self.get_functions
 	}
@@ -299,7 +298,7 @@ where T: Sync + Send {
 	fn mut_post_functions(&mut self)
 	-> &mut HashMap<
 		String,
-		fn(tokio::runtime::Handle, Arc<T>, Option<&str>) -> RasResult
+		fn(Arc<T>, HttpData) -> RasResult
 	> {
 		&mut self.post_functions
 	}
@@ -366,10 +365,13 @@ where T: Sync + Send {
 			}
 		};	
 		let params = splited_path.next();
-		let (func, input_data) = match req.method.unwrap_or("") {
+		let mut data = HttpData {
+			header: req,
+			body: params,
+		};
+		let (func, input_data) = match data.header.method.unwrap_or("") {
 			"GET" => {
-				(self.get_functions(), params)
-				// self.get_handler(func_name, params).await
+				(self.get_functions(), data)
 			},
 			"POST" => {
 				if BUFFER_SIZE < data_end 
@@ -383,7 +385,8 @@ where T: Sync + Send {
 						return (HttpStatus::BadRequest, None);
 					},
 				};
-				(self.post_functions(), Some(content))
+				data.body = Some(content);
+				(self.post_functions(), data)
 			},
 			_ => return (HttpStatus::BadRequest, None),
 		};
@@ -433,6 +436,11 @@ pub enum HttpStatus {
 	NotFound,
 }
 
+pub struct HttpData <'a> {
+	pub header: Request<'a, 'a>,
+	pub body: Option::<&'a str>,
+}
+
 /// Get header line
 impl HttpStatus {
 	pub fn get_string(&self) -> String {
@@ -458,9 +466,8 @@ struct SomeService {
 	}
 
 	fn some_test_get(
-		_runtime: tokio::runtime::Handle,
 		_self_service: Arc<SomeService>,
-		_params: Option<&str>)
+		_params: HttpData)
 	-> RasResult {
 		RasResult::Sync(
 			HttpStatus::OK,
@@ -479,8 +486,11 @@ struct SomeService {
 		let arc_rsb_2 = arc_rsb.clone();
 		arc_rsb_2.runtime.block_on(async move {
 			let func = arc_rsb.get_functions();
+			const HEADER_BUFFER_SIZE: usize = 32;
+			let mut headers = [httparse::EMPTY_HEADER; HEADER_BUFFER_SIZE];
+			let req = httparse::Request::new(&mut headers);
 			let (http_status, data) = 
-				arc_rsb.query_handle(&func, "some_test_get", None).await;
+				arc_rsb.query_handle(&func, "some_test_get", HttpData { header: req, body: None }).await;
 			assert_eq!(http_status, HttpStatus::OK);
 			assert_eq!(data, None);
 		});

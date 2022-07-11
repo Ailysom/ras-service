@@ -14,11 +14,10 @@ impl Service {
 }
 
 fn some_test_post(
-	runtime: Handle,
 	self_service: Arc<Service>,
-	query: Option<&str>)
+	query: HttpData)
 -> RasResult {
-	let query: HashMap<String, Option<String>> = if let Some(query_str) = query {
+	let query: HashMap<String, Option<String>> = if let Some(query_str) = query.body {
 		match serde_json::from_str(query_str) {
 			Ok(query) => query,
 			Err(err) => {
@@ -30,6 +29,7 @@ fn some_test_post(
 		return RasResult::Sync(HttpStatus::BadRequest, None);
 	};
 	let service = self_service.clone();
+	let runtime = Handle::current();
 	RasResult::Async(runtime.spawn(async move {
 		let result = format!("You data: {:?}; Resource: {:?}", query, service.some_data);
 		(HttpStatus::OK, Some(result))
@@ -37,11 +37,10 @@ fn some_test_post(
 }
 
 fn some_test_get(
-	_runtime: Handle,
 	_self_service: Arc<Service>,
-	params: Option<&str>)
+	params: HttpData)
 -> RasResult {
-	let result = if let Some(param_str) = params {
+	let result = if let Some(param_str) = params.body {
 		format!(
 			"Your params: {:?}",
 			ras_service::ras_helper::parse_get_params(param_str)
